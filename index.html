@@ -5871,6 +5871,7 @@ function renderIntro() {
 }
 
 function selectGender(gender) {
+  parent.postMessage({ event: "assessment_start", gender: gender }, "*");
   // --- Tracking: Assessment Start ---
   try {
     // Meta Pixel
