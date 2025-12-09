@@ -5871,6 +5871,25 @@ function renderIntro() {
 }
 
 function selectGender(gender) {
+  // --- Tracking: Assessment Start ---
+  try {
+    // Meta Pixel
+    if (typeof fbq === "function") {
+      fbq("trackCustom", "assessment_start", { gender: gender });
+    }
+    // GA4
+    if (typeof gtag === "function") {
+      gtag("event", "assessment_start", {
+        event_category: "Assessment",
+        event_label: gender
+      });
+    }
+    // Send event to Webflow parent page (iframe communication)
+    parent.postMessage({ event: "assessment_start", gender: gender }, "*");
+  } catch (e) {
+    console.warn("Tracking error:", e);
+  }
+
   quizGender = gender;
   const genderSpecific = gender === 'female' ? femaleQuestions : maleQuestions;
   quizSteps = [...sharedQuestions, ...genderSpecific, { id: 'contactInfo', type: 'contact' }];
@@ -6034,6 +6053,20 @@ function handleNoneCheckbox(questionId) {
 }
 
 function handleNext() {
+  // --- Tracking: Assessment Step ---
+  try {
+    if (typeof fbq === "function") {
+      fbq("trackCustom", "assessment_step");
+    }
+    if (typeof gtag === "function") {
+      gtag("event", "assessment_step", {
+        event_category: "Assessment",
+        event_label: "Step Progress"
+      });
+    }
+    parent.postMessage({ event: "assessment_step" }, "*");
+  } catch(e) { console.warn("tracking error", e); }
+
   const step = quizSteps[quizIndex];
   if (!step) return;
   clearError();
@@ -6091,6 +6124,20 @@ function handlePrev() {
 }
 
 function finishQuiz() {
+  // --- Tracking: Assessment Submit ---
+  try {
+    if (typeof fbq === "function") {
+      fbq("trackCustom", "assessment_submit");
+    }
+    if (typeof gtag === "function") {
+      gtag("event", "assessment_submit", {
+        event_category: "Assessment",
+        event_label: "Submit"
+      });
+    }
+    parent.postMessage({ event: "assessment_submit" }, "*");
+  } catch(e) { console.warn(e); }
+
   const name = document.getElementById('quizName').value.trim();
   const email = document.getElementById('quizEmail').value.trim();
   const phone = document.getElementById('quizPhone').value.trim();
@@ -6970,6 +7017,20 @@ function sendToSheets(data) {
   }
 
   function handleSubmissionResponse({ initialResult, fallbackData = {}, resultsContent } = {}) {
+    // --- Tracking: Score Generated ---
+    try {
+      if (typeof fbq === "function") {
+        fbq("trackCustom", "score_generated");
+      }
+      if (typeof gtag === "function") {
+        gtag("event", "score_generated", {
+          event_category: "Assessment",
+          event_label: "Final Score"
+        });
+      }
+      parent.postMessage({ event: "score_generated" }, "*");
+    } catch(e) { console.warn("tracking error", e); }
+
     const container = resultsContent || document.getElementById('resultsContent');
 
     if (!initialResult) {
