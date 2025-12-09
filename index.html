@@ -7323,6 +7323,14 @@ function setLeadType(type) {
 }
 </script>
 
+<script>
+function sendHeight() {
+  parent.postMessage({ type: "resize-iframe", height: document.body.scrollHeight }, "*");
+}
+window.addEventListener("load", sendHeight);
+window.addEventListener("resize", sendHeight);
+setInterval(sendHeight, 400);
+</script>
 </body>
 </html>
 
