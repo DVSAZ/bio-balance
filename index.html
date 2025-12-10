@@ -5889,10 +5889,9 @@ function renderIntro() {
 
     // --- Tracking: Assessment Start ---
     try {
-      // Meta Pixel — custom event
+      // Meta Pixel — custom event (NOT a Lead event)
       if (typeof fbq === "function") {
         fbq("trackCustom", "assessment_start");
-        fbq("track", "Lead", { lead_type: "assessment_start" });
       }
 
       // GA4
@@ -6967,14 +6966,8 @@ function sendToSheets(data) {
     // ---- Show Thank-You Popup ----
     showThankYouPopup();
 
-    // ---- Facebook Lead Event ----
-    try {
-      if (typeof fbq === "function") {
-        fbq("track", "Lead", { source: "BioBalance Quiz" });
-      }
-    } catch (e) {
-      console.warn("FB Lead event error:", e);
-    }
+    // Note: Lead event is fired in sendToSheets() after successful submission
+    // to avoid duplicate tracking
 
     // Notify parent page so it can fire the Lead event
     try {
