@@ -5583,6 +5583,20 @@ document.addEventListener("scroll", () => {
    Embedded from quiz2.html to power the assessment
    ============================ */
 
+// Internal event tracking helper
+function trackEvent(eventType, eventData = {}) {
+  fetch("https://script.google.com/macros/s/AKfycbxeiGuZs3BIbNoQXuQV-5LGxWwQ3IoIYGl9nDRM8tPAH2fKCTm4XKM7q07VqIVW45xeUg/exec", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "internal_event",
+      event: eventType,
+      data: eventData,
+      timestamp: Date.now()
+    })
+  }).catch(err => console.warn("Internal tracking error:", err));
+}
+
 // Shared questions (all genders)
 const sharedQuestions = [
   {
@@ -5870,39 +5884,53 @@ function renderIntro() {
   `;
 }
 
-function selectGender(gender) {
-  parent.postMessage({ event: "assessment_start", gender: gender }, "*");
-  // --- Tracking: Assessment Start ---
-  try {
-    // Meta Pixel
-    if (typeof fbq === "function") {
-      fbq("trackCustom", "assessment_start", { gender: gender });
-    }
-    // GA4
-    if (typeof gtag === "function") {
-      gtag("event", "assessment_start", {
-        event_category: "Assessment",
-        event_label: gender
-      });
-    }
-    // Send event to Webflow parent page (iframe communication)
+  function selectGender(gender) {
     parent.postMessage({ event: "assessment_start", gender: gender }, "*");
-  } catch (e) {
-    console.warn("Tracking error:", e);
+
+    // --- Tracking: Assessment Start ---
+    try {
+      // Meta Pixel — custom event
+      if (typeof fbq === "function") {
+        fbq("trackCustom", "assessment_start");
+        fbq("track", "Lead", { lead_type: "assessment_start" });
+      }
+
+      // GA4
+      if (typeof gtag === "function") {
+        gtag("event", "assessment_start", {
+          event_category: "Assessment"
+        });
+      }
+
+    } catch (e) {
+      console.warn("Tracking error:", e);
+    }
+
+    // Continue quiz logic
+    quizGender = gender;
+    trackEvent("gender_selected", { gender });
+
+    // --- Internal Gender Tracking ---
+    fetch("https://script.google.com/macros/s/AKfycbxeiGuZs3BIbNoQXuQV-5LGxWwQ3IoIYGl9nDRM8tPAH2fKCTm4XKM7q07VqIVW45xeUg/exec", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "gender_selection",
+        gender: gender,
+        timestamp: Date.now()
+      })
+    }).catch(err => console.warn("Gender tracking error:", err));
+
+    const genderSpecific = gender === 'female' ? femaleQuestions : maleQuestions;
+    quizSteps = [...sharedQuestions, ...genderSpecific, { id: 'contactInfo', type: 'contact' }];
+    quizIndex = 0;
+    renderCurrentStep();
+
+    // Hide sticky CTA
+    const stickyCta = document.querySelector('.sticky-cta');
+    if (stickyCta) stickyCta.style.display = 'none';
   }
 
-  quizGender = gender;
-  const genderSpecific = gender === 'female' ? femaleQuestions : maleQuestions;
-  quizSteps = [...sharedQuestions, ...genderSpecific, { id: 'contactInfo', type: 'contact' }];
-  quizIndex = 0;
-  renderCurrentStep();
-  
-  // Hide the sticky CTA once the quiz is started
-  const stickyCta = document.querySelector('.sticky-cta');
-  if (stickyCta) {
-    stickyCta.style.display = 'none';
-  }
-}
 
 function renderCurrentStep() {
   const content = document.getElementById("quizContent");
@@ -6158,6 +6186,7 @@ function finishQuiz() {
   quizAnswers['scorePercent'] = scorePercent;
   quizAnswers['promoCode'] = promoCode;
   const submissionPromise = sendToSheets(quizAnswers);
+  trackEvent("lead_submitted", { gender: quizGender });
   const firstName = name.split(' ')[0] || '';
 
   return {
@@ -6557,6 +6586,7 @@ function sendBookingEvent(options = {}) {
 }
 
 function handleBookConsultationClick(event) {
+  trackEvent("book_consultation_click", { gender: quizGender });
   setLeadType('Hot');
   const context = window.bioBalanceLeadContext || {};
   context.leadType = 'Hot';
@@ -6598,6 +6628,7 @@ async function handleReportCloseClick(buttonEl) {
 }
 
 function handleLearnMoreClick(event) {
+  trackEvent("book_consultation_click", { gender: quizGender });
   setLeadType('Warm');
   const context = window.bioBalanceLeadContext || {};
   context.leadType = 'Warm';
@@ -6678,8 +6709,13 @@ function returnToPreviousPage() {
 }
 
 function sendToSheets(data) {
+  console.log('[sendToSheets] Function called');
+  console.log('[sendToSheets] Input data keys:', Object.keys(data));
+  console.log('[sendToSheets] Input data:', data);
+  
   const leadId = ensureLeadId();
   data.leadId = data.leadId || leadId;
+  console.log('[sendToSheets] Lead ID:', leadId);
 
   // Extract UTM parameters from URL
   const urlParams = new URLSearchParams(window.location.search);
@@ -6772,15 +6808,49 @@ function sendToSheets(data) {
     `;
   }
 
+  // Debug logging to help diagnose submission issues
+  console.log('[sendToSheets] Submitting payload:', JSON.stringify(payload, null, 2));
+  
   return fetch(APP_SCRIPT_URL, {
     method: 'POST',
     mode: 'cors',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify(payload)
   })
-    .then((response) => response.json())
+    .then((response) => {
+      console.log('[sendToSheets] Response status:', response.status, response.statusText);
+      if (!response.ok) {
+        console.error('[sendToSheets] HTTP error:', response.status);
+      }
+      return response.json();
+    })
     .then((result) => {
+      console.log('[sendToSheets] Server result:', result);
+      if (result.status === 'error') {
+        console.error('[sendToSheets] Server error message:', result.message);
+      }
       updateLeadContextFromResponse(result);
+
+      // Notify parent page that the quiz has reached the thank-you state
+      try {
+        parent.postMessage({ event: "quiz_thankyou" }, "*");
+      } catch (e) {
+        console.warn("Parent messaging failed:", e);
+      }
+
+      // --- Meta Pixel Lead Event ---
+      try {
+        if (typeof fbq === "function") {
+          fbq("track", "Lead", {
+            source: "bio_balance_quiz",
+            form_step: "contact_info",
+            quiz_version: "v1",
+          });
+        }
+      } catch (e) {
+        console.warn("FB Lead event error:", e);
+      }
+
       const tracker = window.AIProgressTracker;
       if (tracker && typeof tracker.handleSubmissionResponse === 'function') {
         tracker.handleSubmissionResponse({
@@ -6791,12 +6861,15 @@ function sendToSheets(data) {
       } else if (result.status === 'success' && result.reportHtml) {
         renderReportHtml(resultsContent, result.reportHtml);
       } else {
+        console.log('[sendToSheets] Rendering fallback - result:', result);
         renderReportFallback(resultsContent, data);
       }
       return { success: true, payload: result };
     })
     .catch((error) => {
-      console.error('Error:', error);
+      console.error('[sendToSheets] Fetch error:', error);
+      console.error('[sendToSheets] Error name:', error.name);
+      console.error('[sendToSheets] Error message:', error.message);
       if (resultsContent) {
         resultsContent.innerHTML = `
         <div style="padding:40px 20px;text-align:center;">
@@ -6804,6 +6877,7 @@ function sendToSheets(data) {
           <p style="font-size:15px;color:var(--text-medium);">
             We saved your answers, but couldn't generate your full report. Our team will follow up manually.
           </p>
+          <p style="font-size:12px;color:#999;margin-top:10px;">Debug: ${error.message || 'Unknown error'}</p>
         </div>
         `;
       }
@@ -6889,6 +6963,26 @@ function sendToSheets(data) {
     event.preventDefault();
     const submission = finishQuiz();
     if (!submission) return;
+
+    // ---- Show Thank-You Popup ----
+    showThankYouPopup();
+
+    // ---- Facebook Lead Event ----
+    try {
+      if (typeof fbq === "function") {
+        fbq("track", "Lead", { source: "BioBalance Quiz" });
+      }
+    } catch (e) {
+      console.warn("FB Lead event error:", e);
+    }
+
+    // Notify parent page so it can fire the Lead event
+    try {
+      parent.postMessage({ event: "quiz_thankyou" }, "*");
+    } catch (e) {
+      console.warn("Parent messaging failed:", e);
+    }
+
     const leadId = ensureLeadId();
     showClinicalTimeline();
     startStatusPolling(leadId);
@@ -7032,6 +7126,15 @@ function sendToSheets(data) {
       parent.postMessage({ event: "score_generated" }, "*");
     } catch(e) { console.warn("tracking error", e); }
 
+    setTimeout(() => {
+      const newUrl =
+        window.location.origin +
+        window.location.pathname +
+        "?thankyou=true";
+
+      window.history.replaceState({}, "", newUrl);
+    }, 50);
+
     const container = resultsContent || document.getElementById('resultsContent');
 
     if (!initialResult) {
@@ -7084,6 +7187,40 @@ function sendToSheets(data) {
     syncTimelineTo(step);
   }
 
+  // Popup UI
+  function showThankYouPopup() {
+    const popup = document.createElement('div');
+    popup.innerHTML = `
+      <div style="
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #0A466B;
+        color: white;
+        padding: 14px 20px;
+        border-radius: 8px;
+        font-size: 15px;
+        box-shadow: 0 6px 18px rgba(0,0,0,0.2);
+        z-index: 99999;
+        animation: fadeInOut 4s forwards;
+      ">
+        Thank you! Your assessment has been submitted.
+      </div>
+    `;
+    document.body.appendChild(popup);
+  }
+
+  const fadeStyle = document.createElement("style");
+  fadeStyle.innerHTML = `
+    @keyframes fadeInOut {
+      0% { opacity: 0; transform: translateY(-10px); }
+      10% { opacity: 1; transform: translateY(0); }
+      90% { opacity: 1; }
+      100% { opacity: 0; transform: translateY(-10px); }
+    }
+  `;
+  document.head.appendChild(fadeStyle);
+
   window.ClinicalTimeline = {
     attachQuizFormHandler,
     startReportTimeline,
@@ -7111,6 +7248,13 @@ function sendToSheets(data) {
 })();
 
 document.addEventListener('DOMContentLoaded', initBioBalanceQuiz);
+
+window.addEventListener("beforeunload", function () {
+  trackEvent("window_closed", {
+    gender: quizGender,
+    step: quizIndex
+  });
+});
 
 const quizDynamicStyles = document.createElement('style');
 quizDynamicStyles.textContent = `
@@ -7392,6 +7536,19 @@ function sendHeight() {
 window.addEventListener("load", sendHeight);
 window.addEventListener("resize", sendHeight);
 setInterval(sendHeight, 400);
+</script>
+
+<script>
+window.addEventListener("message", (event) => {
+  if (event.data?.event === "quiz_thankyou") {
+    const newUrl =
+      window.location.origin +
+      window.location.pathname +
+      "?thankyou=true";
+
+    window.history.replaceState({}, "", newUrl);
+  }
+});
 </script>
 
 </body>
